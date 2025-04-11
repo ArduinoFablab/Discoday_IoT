@@ -1,0 +1,139 @@
+// Choose program options.
+//#define PRINT_RAW_DATA
+#define USE_AVG
+
+// Arduino pin numbers
+const int sharpLEDPin = 7;
+const int sharpVoPin = A3;
+const int dhtPin = 2;
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+// OLED settings
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// DHT11 settings
+#define DHTTYPE DHT11
+DHT dht(dhtPin, DHTTYPE);
+
+// Display toggle timer
+unsigned long lastToggleTime = 0;
+const unsigned long displayInterval = 5000;
+bool showPM = true;
+
+#ifdef USE_AVG
+#define N 100
+static unsigned long VoRawTotal = 0;
+static int VoRawCount = 0;
+#endif
+
+static float Voc = 0.6;
+const float K = 0.5;
+
+void printValue(String text, unsigned int value, bool isLast = false) {
+  Serial.print(text); Serial.print("="); Serial.print(value);
+  if (!isLast) Serial.print(", ");
+}
+void printFValue(String text, float value, String units, bool isLast = false) {
+  Serial.print(text); Serial.print("="); Serial.print(value); Serial.print(units);
+  if (!isLast) Serial.print(", ");
+}
+
+void setup() {
+  Serial.begin(9600);
+  delay(2000);
+  Serial.println("Canari Monitor with DHT11 + PM2.5");
+
+  // OLED Init
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    while (true);
+  }
+
+  pinMode(sharpLEDPin, OUTPUT);
+  dht.begin();
+}
+
+void loop() {
+  // Read PM2.5 analog value
+  digitalWrite(sharpLEDPin, LOW);
+  delayMicroseconds(280);
+  int VoRaw = analogRead(sharpVoPin);
+  digitalWrite(sharpLEDPin, HIGH);
+  delayMicroseconds(9620);
+
+#ifdef USE_AVG
+  VoRawTotal += VoRaw;
+  VoRawCount++;
+  if (VoRawCount < N) return;
+  VoRaw = VoRawTotal / N;
+  VoRawTotal = 0;
+  VoRawCount = 0;
+#endif
+
+  float Vo = VoRaw / 1024.0 * 5.0;
+  float dV = Vo - Voc;
+  if (dV < 0) {
+    dV = 0;
+    Voc = Vo;
+  }
+  float dustDensity = dV / K * 100.0;
+
+  // Read temperature & humidity
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+
+  // Print to Serial (debugging)
+  Serial.print("PM2.5: "); Serial.print(dustDensity); Serial.print(" ug/m3");
+  Serial.print(" | Temp: "); Serial.print(temp); Serial.print(" C");
+  Serial.print(" | Humidity: "); Serial.println(hum);
+
+  // Switch display every 5 seconds
+  if (millis() - lastToggleTime > displayInterval) {
+    showPM = !showPM;
+    lastToggleTime = millis();
+  }
+
+  // OLED Display logic
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+
+  if (showPM) {
+    display.print("PM2.5: ");
+    display.print(dustDensity, 1);
+    display.println(" ug/m3");
+
+    display.setCursor(0, 16);
+    if (dustDensity <= 12) display.println("Air: Good");
+    else if (dustDensity <= 35) display.println("Air: Moderate");
+    else if (dustDensity <= 55) display.println("Air: Unhealthy");
+    else if (dustDensity <= 150) display.println("Air: Bad");
+    else if (dustDensity <= 250) display.println("Air: Dangerous");
+    else display.println("Air: RUN!");
+  } else {
+    display.print("Temp: ");
+    if (!isnan(temp)) {
+      display.print(temp, 1);
+      display.println(" C");
+    } else {
+      display.println("Error");
+    }
+
+    display.print("Humidity: ");
+    if (!isnan(hum)) {
+      display.print(hum, 1);
+      display.println(" %");
+    } else {
+      display.println("Error");
+    }
+  }
+
+  display.display();
+}
