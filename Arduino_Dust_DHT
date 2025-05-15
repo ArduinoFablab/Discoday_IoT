@@ -1,139 +1,190 @@
-// Choose program options.
-//#define PRINT_RAW_DATA
-#define USE_AVG
+// === WiFi + DHT11 + PM2.5 + OLED Web Dashboard ===
 
-// Arduino pin numbers
-const int sharpLEDPin = 7;
-const int sharpVoPin = A3;
-const int dhtPin = 2;
-
+#include <WiFi.h>
+#include <DHT.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <DHT.h>
 
-// OLED settings
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 32
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// === WiFi credentials ===
+char ssid[] = "JPDLNSGW";
+char pass[] = "melieseth6";
 
-// DHT11 settings
+// === DHT11 settings ===
+#define DHTPIN 2
 #define DHTTYPE DHT11
-DHT dht(dhtPin, DHTTYPE);
+DHT dht(DHTPIN, DHTTYPE);
+const float TEMP_CORRECTION = -8.0;  //Adjust to calibrate temperature
+const float HUMIDITY_CORRECTION = 5.0; //Adjust to calibrate humidity
 
-// Display toggle timer
-unsigned long lastToggleTime = 0;
-const unsigned long displayInterval = 5000;
-bool showPM = true;
-
+// === PM2.5 Sensor (Analog + LED Control) ===
+const int sharpLEDPin = 7;
+const int sharpVoPin = A3;
+float Voc = 0.6;
+const float K = 0.5;
+#define USE_AVG
 #ifdef USE_AVG
 #define N 100
 static unsigned long VoRawTotal = 0;
 static int VoRawCount = 0;
 #endif
 
-static float Voc = 0.6;
-const float K = 0.5;
+// === OLED setup ===
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-void printValue(String text, unsigned int value, bool isLast = false) {
-  Serial.print(text); Serial.print("="); Serial.print(value);
-  if (!isLast) Serial.print(", ");
-}
-void printFValue(String text, float value, String units, bool isLast = false) {
-  Serial.print(text); Serial.print("="); Serial.print(value); Serial.print(units);
-  if (!isLast) Serial.print(", ");
+// === WiFi Web Server ===
+WiFiServer server(80);
+
+// === Timing ===
+unsigned long lastSampleTime = 0;
+const unsigned long sampleInterval = 10;
+float dustDensity = 0;
+String airQuality = "Unknown";
+
+// === Smoothed sensor values ===
+float smoothedDust = 0;
+float smoothedTemp = 0;
+float smoothedHumidity = 0;
+const float alpha = 0.05;  // Increased smoothing for more stable readings
+
+String getAirQualityLabel(float pm) {
+  if (pm <= 12) return "Good";
+  else if (pm <= 35.4) return "Moderate";
+  else if (pm <= 55.4) return "Unhealthy (Sensitive)";
+  else if (pm <= 150.4) return "Unhealthy";
+  else if (pm <= 250.4) return "Very Unhealthy";
+  else return "Hazardous";
 }
 
 void setup() {
-  Serial.begin(9600);
-  delay(2000);
-  Serial.println("Canari Monitor with DHT11 + PM2.5");
+  Serial.begin(115200);
+  delay(1000);
+  dht.begin();
 
-  // OLED Init
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
-    while (true);
   }
 
-  pinMode(sharpLEDPin, OUTPUT);
-  dht.begin();
-}
-
-void loop() {
-  // Read PM2.5 analog value
-  digitalWrite(sharpLEDPin, LOW);
-  delayMicroseconds(280);
-  int VoRaw = analogRead(sharpVoPin);
-  digitalWrite(sharpLEDPin, HIGH);
-  delayMicroseconds(9620);
-
-#ifdef USE_AVG
-  VoRawTotal += VoRaw;
-  VoRawCount++;
-  if (VoRawCount < N) return;
-  VoRaw = VoRawTotal / N;
-  VoRawTotal = 0;
-  VoRawCount = 0;
-#endif
-
-  float Vo = VoRaw / 1024.0 * 5.0;
-  float dV = Vo - Voc;
-  if (dV < 0) {
-    dV = 0;
-    Voc = Vo;
-  }
-  float dustDensity = dV / K * 100.0;
-
-  // Read temperature & humidity
-  float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
-
-  // Print to Serial (debugging)
-  Serial.print("PM2.5: "); Serial.print(dustDensity); Serial.print(" ug/m3");
-  Serial.print(" | Temp: "); Serial.print(temp); Serial.print(" C");
-  Serial.print(" | Humidity: "); Serial.println(hum);
-
-  // Switch display every 5 seconds
-  if (millis() - lastToggleTime > displayInterval) {
-    showPM = !showPM;
-    lastToggleTime = millis();
-  }
-
-  // OLED Display logic
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
+  display.println("Starting Canari...");
+  display.display();
 
-  if (showPM) {
-    display.print("PM2.5: ");
-    display.print(dustDensity, 1);
-    display.println(" ug/m3");
+  pinMode(sharpLEDPin, OUTPUT);
 
-    display.setCursor(0, 16);
-    if (dustDensity <= 12) display.println("Air: Good");
-    else if (dustDensity <= 35) display.println("Air: Moderate");
-    else if (dustDensity <= 55) display.println("Air: Unhealthy");
-    else if (dustDensity <= 150) display.println("Air: Bad");
-    else if (dustDensity <= 250) display.println("Air: Dangerous");
-    else display.println("Air: RUN!");
-  } else {
-    display.print("Temp: ");
-    if (!isnan(temp)) {
-      display.print(temp, 1);
-      display.println(" C");
-    } else {
-      display.println("Error");
-    }
-
-    display.print("Humidity: ");
-    if (!isnan(hum)) {
-      display.print(hum, 1);
-      display.println(" %");
-    } else {
-      display.println("Error");
-    }
+  WiFi.setHostname("CanariRP2040");
+  WiFi.begin(ssid, pass);
+  Serial.print("Connecting to WiFi");
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
+    Serial.print(".");
+    delay(500);
   }
 
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ Connected to WiFi!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+    server.begin();
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("WiFi OK:");
+    display.println(WiFi.localIP());
+    display.display();
+  } else {
+    Serial.println("\n❌ WiFi failed.");
+    display.println("WiFi failed");
+    display.display();
+  }
+}
+
+void loop() {
+  unsigned long now = millis();
+  if (now - lastSampleTime >= sampleInterval) {
+    lastSampleTime = now;
+
+    digitalWrite(sharpLEDPin, LOW);
+    delayMicroseconds(280);
+    int VoRaw = analogRead(sharpVoPin);
+    digitalWrite(sharpLEDPin, HIGH);
+    delayMicroseconds(9720);
+
+#ifdef USE_AVG
+    VoRawTotal += VoRaw;
+    VoRawCount++;
+    if (VoRawCount >= N) {
+      VoRaw = VoRawTotal / VoRawCount;
+      VoRawTotal = 0;
+      VoRawCount = 0;
+
+      float Vo = VoRaw * (5.0 / 1024.0);
+      float dV = Vo - Voc;
+      if (dV < 0) {
+        dV = 0;
+        Voc = Vo;
+      }
+      float rawDust = dV / K * 100.0;
+      smoothedDust = alpha * rawDust + (1 - alpha) * smoothedDust;
+      dustDensity = smoothedDust;
+      airQuality = getAirQualityLabel(dustDensity);
+    }
+#endif
+  }
+
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  if (!isnan(temperature)) {
+    temperature += TEMP_CORRECTION;
+    smoothedTemp = alpha * temperature + (1 - alpha) * smoothedTemp;
+  }
+  if (!isnan(humidity)) {
+    humidity += HUMIDITY_CORRECTION;
+    smoothedHumidity = alpha * humidity + (1 - alpha) * smoothedHumidity;
+  }
+
+  bool validDHT = !(isnan(temperature) || isnan(humidity));
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("PM2.5: "); display.print(dustDensity, 1); display.println(" ug/m3");
+  display.print("Air: "); display.println(airQuality);
+  if (validDHT) {
+    display.print("Temp: "); display.print(smoothedTemp, 1); display.println(" C");
+    display.print("Humidity: "); display.print(smoothedHumidity, 1); display.println(" %");
+  } else {
+    display.println("DHT Error");
+  }
   display.display();
+
+  WiFiClient client = server.available();
+  if (client) {
+    Serial.println("📲 Client connected");
+
+    String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
+    html += "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<meta http-equiv='refresh' content='5'>";
+    html += "<style>body{font-family:sans-serif;padding:20px;}h2{color:#0077cc;}p{font-size:18px;}</style>";
+    html += "<title>Canari Monitor</title></head><body>";
+    html += "<h2>Canari Environmental Monitor</h2>";
+    html += "<p><strong>PM2.5:</strong> " + String(dustDensity, 1) + " µg/m³</p>";
+    html += "<p><strong>Air Quality:</strong> " + airQuality + "</p>";
+    if (validDHT) {
+      html += "<p><strong>Temperature:</strong> " + String(smoothedTemp, 1) + " °C</p>";
+      html += "<p><strong>Humidity:</strong> " + String(smoothedHumidity, 1) + " %</p>";
+    } else {
+      html += "<p><strong>DHT sensor error</strong></p>";
+    }
+    html += "<p>Auto-refreshes every 5 seconds.</p>";
+    html += "</body></html>";
+
+    client.print(html);
+    delay(1);
+    client.stop();
+    Serial.println("🔌 Client disconnected");
+  }
 }
