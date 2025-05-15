@@ -1,14 +1,14 @@
 // === WiFi + DHT11 + PM2.5 + OLED Web Dashboard ===
 
-#include <WiFi.h>
+#include <WiFiNINA.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
 // === WiFi credentials ===
-char ssid[] = "JPDLNSGW"; //!!!! 2.4GHz only !!!!
-char pass[] = "melieseth6";
+char ssid[] = "Canari"; //!!!! 2.4GHz only !!!!
+char pass[] = "Canari1234";
 
 // === DHT11 settings ===
 #define DHTPIN 2
@@ -42,6 +42,7 @@ unsigned long lastSampleTime = 0;
 const unsigned long sampleInterval = 10;
 float dustDensity = 0;
 String airQuality = "Unknown";
+String ipDisplay = "";
 
 // === Smoothed sensor values ===
 float smoothedDust = 0;
@@ -60,6 +61,7 @@ String getAirQualityLabel(float pm) {
 
 void setup() {
   Serial.begin(115200);
+  while (!Serial);
   delay(1000);
   dht.begin();
 
@@ -76,9 +78,8 @@ void setup() {
 
   pinMode(sharpLEDPin, OUTPUT);
 
-  WiFi.setHostname("CanariRP2040");
-  WiFi.begin(ssid, pass);
   Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, pass);
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
     Serial.print(".");
@@ -90,15 +91,10 @@ void setup() {
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
     server.begin();
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("WiFi OK:");
-    display.println(WiFi.localIP());
-    display.display();
+    ipDisplay = WiFi.localIP().toString();
   } else {
     Serial.println("\n❌ WiFi failed.");
-    display.println("WiFi failed");
-    display.display();
+    ipDisplay = "Offline";
   }
 }
 
@@ -159,6 +155,7 @@ void loop() {
   } else {
     display.println("DHT Error");
   }
+  display.print("IP: "); display.println(ipDisplay);
   display.display();
 
   WiFiClient client = server.available();
