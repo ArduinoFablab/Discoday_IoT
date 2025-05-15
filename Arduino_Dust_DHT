@@ -1,4 +1,4 @@
-// === WiFi + DHT11 + PM2.5 + OLED Web Dashboard ===
+// ===Canari ODC Fablab incl WiFi + DHT11 + PM2.5 + OLED Web Dashboard ===
 
 #include <WiFi.h>
 #include <DHT.h>
@@ -7,8 +7,8 @@
 #include <Adafruit_SSD1306.h>
 
 // === WiFi credentials ===
-char ssid[] = "JPDLNSGW";
-char pass[] = "melieseth6";
+char ssid[] = "SSID"; //2.4GHz only !!!!!!!
+char pass[] = "PASS";
 
 // === DHT11 settings ===
 #define DHTPIN 2
@@ -17,7 +17,7 @@ DHT dht(DHTPIN, DHTTYPE);
 const float TEMP_CORRECTION = -8.0;  //Adjust to calibrate temperature
 const float HUMIDITY_CORRECTION = 5.0; //Adjust to calibrate humidity
 
-// === PM2.5 Sensor (Analog + LED Control) ===
+// === PM2.5 Sensor 
 const int sharpLEDPin = 7;
 const int sharpVoPin = A3;
 float Voc = 0.6;
@@ -47,7 +47,7 @@ String airQuality = "Unknown";
 float smoothedDust = 0;
 float smoothedTemp = 0;
 float smoothedHumidity = 0;
-const float alpha = 0.05;  // Increased smoothing for more stable readings
+const float alpha = 0.05;  // Lower values for smoother readings
 
 String getAirQualityLabel(float pm) {
   if (pm <= 12) return "Good";
@@ -122,11 +122,9 @@ void loop() {
       VoRawCount = 0;
 
       float Vo = VoRaw * (5.0 / 1024.0);
+      Voc = 0.999 * Voc + 0.001 * Vo;
       float dV = Vo - Voc;
-      if (dV < 0) {
-        dV = 0;
-        Voc = Vo;
-      }
+      if (dV < 0) dV = 0;
       float rawDust = dV / K * 100.0;
       smoothedDust = alpha * rawDust + (1 - alpha) * smoothedDust;
       dustDensity = smoothedDust;
