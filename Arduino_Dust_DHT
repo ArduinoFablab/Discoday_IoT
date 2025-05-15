@@ -14,8 +14,8 @@ char pass[] = "Canari1234";
 #define DHTPIN 2
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
-const float TEMP_CORRECTION = -10.0;  //Adjust to calibrate temperature
-const float HUMIDITY_CORRECTION = 10.0; //Adjust to calibrate humidity
+const float TEMP_CORRECTION = -8.0;  //Adjust to calibrate temperature
+const float HUMIDITY_CORRECTION = 5.0; //Adjust to calibrate humidity
 
 // === PM2.5 Sensor ===
 const int sharpLEDPin = 7;
@@ -61,12 +61,11 @@ String getAirQualityLabel(float pm) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
   delay(1000);
   dht.begin();
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("SSD1306 allocation failed"));
+    if (Serial) Serial.println(F("SSD1306 allocation failed"));
   }
 
   display.clearDisplay();
@@ -78,22 +77,24 @@ void setup() {
 
   pinMode(sharpLEDPin, OUTPUT);
 
-  Serial.print("Connecting to WiFi");
+  if (Serial) Serial.print("Connecting to WiFi");
   WiFi.begin(ssid, pass);
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
-    Serial.print(".");
+    if (Serial) Serial.print(".");
     delay(500);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ Connected to WiFi!");
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+    if (Serial) {
+      Serial.println("\n✅ Connected to WiFi!");
+      Serial.print("IP: ");
+      Serial.println(WiFi.localIP());
+    }
     server.begin();
     ipDisplay = WiFi.localIP().toString();
   } else {
-    Serial.println("\n❌ WiFi failed.");
+    if (Serial) Serial.println("\n❌ WiFi failed.");
     ipDisplay = "Offline";
   }
 }
@@ -160,7 +161,7 @@ void loop() {
 
   WiFiClient client = server.available();
   if (client) {
-    Serial.println("📲 Client connected");
+    if (Serial) Serial.println("📲 Client connected");
 
     String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
     html += "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
@@ -182,6 +183,6 @@ void loop() {
     client.print(html);
     delay(1);
     client.stop();
-    Serial.println("🔌 Client disconnected");
+    if (Serial) Serial.println("🔌 Client disconnected");
   }
 }
