@@ -14,8 +14,8 @@ char pass[] = "Canari1234";
 #define DHTPIN 2
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
-const float TEMP_CORRECTION = -8.0;  //Adjust to calibrate temperature
-const float HUMIDITY_CORRECTION = 5.0; //Adjust to calibrate humidity
+const float TEMP_CORRECTION = 0.0;  //Adjust to calibrate temperature
+const float HUMIDITY_CORRECTION = 0.0; //Adjust to calibrate humidity
 
 // === PM2.5 Sensor ===
 const int sharpLEDPin = 7;
